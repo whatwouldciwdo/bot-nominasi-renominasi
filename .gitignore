@@ -3,6 +3,7 @@ logs/
 .env
 *.log
 .DS_Store
+public/dashboard/
 
 # File lock/temporary Office (Excel/Word)
 ~$*

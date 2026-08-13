@@ -25,11 +25,14 @@ function parseNomination(rawText) {
   const cl = extractCL(normalized);
   const { valid, errors } = validate({ date, cl });
 
-  // ReNominasi, ReNominasi-2, dan Re Nominasi dihitung sebagai Re-Nominasi.
-  const isRenominasi = /\bre\s*[- ]?\s*nominasi\b/i.test(normalized);
+  // "Revisi Nominasi" adalah keyword tersendiri dengan flow Nominasi biasa.
+  // Karena itu, hanya bentuk ReNominasi/Re-Nominasi/Re Nominasi yang dianggap
+  // sebagai Re-Nominasi.
+  const isRevisiNominasi = /\brevisi\s+nominasi\b/i.test(normalized);
+  const isRenominasi = !isRevisiNominasi && /\bre\s*[- ]?\s*nominasi\b/i.test(normalized);
   const kind = isRenominasi ? 'Re-Nominasi' : 'Nominasi';
 
-  return { raw, normalized, date, cl, valid, errors, isRenominasi, kind };
+  return { raw, normalized, date, cl, valid, errors, isRevisiNominasi, isRenominasi, kind };
 }
 
 module.exports = { parseNomination };

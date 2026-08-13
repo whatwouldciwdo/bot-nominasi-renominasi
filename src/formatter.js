@@ -7,7 +7,7 @@
  */
 function buildForm(date, cl) {
   return {
-    date: date.formatted,
+    date: date.formattedLong || date.formatted,
     unit: 'CL',
     gsa: cl.gsa ?? 0,
     swapping: cl.swap ?? 0,
@@ -46,19 +46,4 @@ function successReply(form, withSummary = true, kind = 'Re-Nominasi') {
   return `Baik Pak, Data ${kind} berhasil diinput 🙏`;
 }
 
-/**
- * Balasan gagal untuk WhatsApp, menampilkan alasan spesifik.
- * @param {string[]} errors
- */
-function errorReply(errors, kind = 'Re-Nominasi') {
-  const list = (errors && errors.length ? errors : ['Format pesan tidak dikenali.'])
-    .map((e) => `• ${e}`)
-    .join('\n');
-  return (
-    `Mohon maaf, format ${kind} belum dapat diproses:\n` +
-    `${list}\n\n` +
-    'Mohon periksa kembali format pesan. Terima kasih 🙏'
-  );
-}
-
-module.exports = { buildForm, formText, successReply, errorReply };
+module.exports = { buildForm, formText, successReply };

@@ -68,14 +68,39 @@ docker compose up -d --build
   - (WAHA 2026 menolak password lemah seperti `admin`, jadi password dipin ke
     string kuat ini di `docker-compose.yml`. Silakan ganti lalu
     `docker compose up -d waha`.)
-- Mulai sesi `default`, lalu **scan QR code** dengan WhatsApp nomor bot
+- Gunakan sesi `cctv` yang sudah terhubung, lalu masukkan nomor WhatsApp sesi
+  tersebut ke grup target. Jika sesi terputus, **scan QR code** dengan WhatsApp nomor bot
   (menu *Perangkat tertaut* di aplikasi WhatsApp).
 - Setelah tersambung, sesi tersimpan di volume `waha_sessions`
   (tidak perlu scan ulang saat restart).
 
-### 4. Cek bot hidup
+> **Penting:** instance bot ini dikunci ke sesi `cctv`; webhook dari sesi WAHA
+> lain tidak akan diproses. Sesi lain tidak dihapus.
+
+Jika sesi `cctv` belum ada, buka dashboard WAHA (`http://localhost:3010` sesuai
+port di `docker-compose.yml`), pilih **Sessions → Create/Start**, isi nama
+`cctv`, lalu scan QR. Alternatif melalui API WAHA:
+
 ```bash
-curl http://localhost:3001/health
+curl -X POST http://localhost:3010/api/sessions/start \
+  -H "X-Api-Key: bot-cilegon-secret-2026" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"cctv"}'
+```
+
+Setelah QR tersambung, cek sesi yang dipakai bot:
+
+```bash
+curl http://localhost:8301/api/waha-status
+```
+
+Respons harus menunjukkan `session: "cctv"` dan status `WORKING`.
+
+### 4. Buka dashboard & cek bot hidup
+Dashboard bot tersedia di **http://localhost:8301/dashboard**.
+
+```bash
+curl http://localhost:8301/health
 ```
 Harusnya membalas `{"status":"ok",...}`.
 
@@ -110,6 +135,27 @@ copy .env.example .env
 npm run dev
 ```
 
+Untuk menjalankan dashboard React dalam mode development (hot reload), gunakan
+dua terminal:
+
+```bash
+# Terminal 1 — backend API
+npm run dev
+
+# Terminal 2 — Vite dashboard, http://localhost:5173/dashboard/
+npm run dev:dashboard
+```
+
+Vite otomatis mem-proxy `/api` ke backend `http://localhost:3001`. Untuk build
+production dashboard ke `public/dashboard/`, jalankan:
+
+```bash
+npm run build:dashboard
+```
+
+Route Express `/dashboard` akan memakai hasil build Vite tersebut dan tetap
+memakai endpoint API backend yang sama.
+
 Jalankan uji parsing (tanpa perlu WhatsApp):
 ```bash
 npm run test:parse
@@ -123,7 +169,7 @@ npm run test:parse
 | -------------------- | ------------------------------------------------------- |
 | `PORT`               | Port backend bot (di Docker = 3001)                     |
 | `WAHA_URL`           | URL WAHA API (`http://waha:3000` saat docker-compose)   |
-| `WAHA_SESSION`       | Nama sesi WAHA (default `default`)                      |
+| `WAHA_SESSION`       | Nama sesi WhatsApp yang dipakai bot (deployment ini: `cctv`) |
 | `WAHA_API_KEY`       | API key WAHA (kosongkan jika tidak dipakai)             |
 | `TARGET_GROUP_ID`    | ID grup target; kosong = semua chat (mode uji)          |
 | `TRIGGER_KEYWORDS`   | Kata kunci pemicu, pisah koma                            |
@@ -151,6 +197,9 @@ src/
     validate.js      # validasi + error spesifik
 test/
   parse.test.js      # uji parsing (npm run test:parse)
+dashboard/
+  src/                # aplikasi Vite + React dashboard
+  vite.config.mjs     # proxy dev dan output build production
 ```
 
 ---

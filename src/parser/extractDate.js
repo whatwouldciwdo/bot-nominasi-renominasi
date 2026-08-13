@@ -2,7 +2,7 @@
 
 /**
  * Ambil tanggal nominasi dari teks (pola tanggal Indonesia).
- * Contoh: "Nominasi PGN 24 Juni 2026" -> { day, month, year, formatted:"24-Jun-26" }.
+ * Contoh: "Nominasi PGN 24 Juni 2026" -> tanggal dengan format pendek dan panjang.
  */
 
 const MONTHS = {
@@ -25,9 +25,14 @@ const MONTH_SHORT = [
   'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
 ];
 
+const MONTH_LONG = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 /**
  * @param {string} text
- * @returns {{raw:string, day:number, month:number, year:number, formatted:string}|null}
+ * @returns {{raw:string, day:number, month:number, year:number, formatted:string, formattedLong:string}|null}
  */
 function extractDate(text) {
   if (typeof text !== 'string' || !text) return null;
@@ -59,8 +64,9 @@ function extractDate(text) {
 
   const yy = String(year).slice(-2);
   const formatted = `${String(day).padStart(2, '0')}-${MONTH_SHORT[month]}-${yy}`;
+  const formattedLong = `${day} - ${MONTH_LONG[month]} - ${year}`;
 
-  return { raw: m[0], day, month, year, formatted };
+  return { raw: m[0], day, month, year, formatted, formattedLong };
 }
 
-module.exports = { extractDate, MONTHS, MONTH_SHORT };
+module.exports = { extractDate, MONTHS, MONTH_SHORT, MONTH_LONG };

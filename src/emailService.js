@@ -9,8 +9,18 @@
  */
 
 const nodemailer = require('nodemailer');
+const fs = require('fs');
+const path = require('path');
+const { randomUUID } = require('crypto');
 const config = require('./config');
-const { formText } = require('./formatter');
+const { buildAttachment } = require('./xlsxService');
+
+const EMAIL_ATTACHMENT_DIR = path.join(__dirname, '..', 'logs', 'email-attachments');
+const NOMINASI_LOG = path.join(__dirname, '..', 'logs', 'nominasi.jsonl');
+
+// Menahan nomor revisi selama proses berjalan agar dua webhook bersamaan tidak
+// memakai nomor yang sama sebelum record-nya ditulis oleh logger.
+const revisionReservations = new Map();
 
 let transporter = null;
 
@@ -57,68 +67,211 @@ async function verifyConnection() {
   }
 }
 
-/** Bangun subjek & body email dari form nominasi. */
-function buildMail(form, kind = 'Re-Nominasi') {
-  const e = config.email;
-  const subject = `${e.subjectPrefix} — ${kind} ${form.date} (Total ${form.totalNominasi})`;
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
+function latestRevision(date) {
+  let latest = 0;
+  try {
+    if (!fs.existsSync(NOMINASI_LOG)) return 0;
+    for (const line of fs.readFileSync(NOMINASI_LOG, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        const subject = entry.emailDetails?.subject || entry.email?.subject || '';
+        if (entry.form?.date === date && entry.kind === 'Re-Nominasi') {
+          const match = subject.match(/Rev(\d+)/i);
+          if (match) latest = Math.max(latest, Number(match[1]));
+        }
+      } catch (_) { /* Abaikan baris log yang rusak. */ }
+    }
+  } catch (_) { /* Log tidak tersedia tidak boleh menggagalkan pengiriman. */ }
+  return latest;
+}
+
+function nextRevision(date) {
+  const reserved = revisionReservations.get(date) || 0;
+  const revision = Math.max(latestRevision(date), reserved) + 1;
+  revisionReservations.set(date, revision);
+  return revision;
+}
+
+/** Bangun subject & body resmi email nominasi/renominasi. */
+function buildMail(form, kind = 'Re-Nominasi', revision) {
+  const isRevision = /^re[- ]?nominasi$/i.test(kind) || /^re/i.test(kind);
+  const subject = isRevision
+    ? `Rev${revision || 1} Nominasi Harian PIP UBP Cilegon ${form.date}`
+    : `Nominasi Harian PIP UBP Cilegon ${form.date}`;
+  const intro = isRevision
+    ? `Sehubungan dengan kebutuhan pasokan gas PGN ke PIP UBP Cilegon, bersama ini kami mengajukan revisi-1 nominasi pasokan gas PGN untuk PIP UBP Cilegon periode ${form.date}  (terlampir).`
+    : `Sehubungan dengan kebutuhan pasokan gas PGN ke PIP UBP Cilegon, bersama ini kami mengajukan nominasi pasokan gas PGN untuk PIP UBP Cilegon periode ${form.date} (terlampir).`;
   const text = [
-    `Berikut data ${kind} unit CL:`,
-    '',
-    formText(form),
-    '',
-    'Pesan ini dikirim otomatis oleh Bot Nominasi.',
+    'PT Pertamina Gas Negara', '', 'Gas Planning and Optimization', '',
+    'u.p. Division Head, Gas Planning and Optimization', '', intro, '',
+    'Demikian disampaikan, atas perhatian dan kerja samanya diucapkan terima kasih.', '',
+    'Best Regards,',
   ].join('\n');
+  const html = `<div style="font-family:Arial,sans-serif;white-space:pre-line">${escapeHtml(text)}</div>`;
+  return { subject, text, html, revision: isRevision ? (revision || 1) : null };
+}
 
-  const html = `
-    <p>Berikut data <b>${kind}</b> unit <b>CL</b>:</p>
-    <table cellpadding="6" cellspacing="0" border="1"
-           style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px">
-      <tr><td>Date</td><td><b>${form.date}</b></td></tr>
-      <tr><td>Unit</td><td>${form.unit}</td></tr>
-      <tr><td>GSA</td><td>${form.gsa}</td></tr>
-      <tr><td>Swapping</td><td>${form.swapping}</td></tr>
-      <tr><td>Stok LNG</td><td>${form.stokLNG}</td></tr>
-      <tr><td>Total Nominasi</td><td><b>${form.totalNominasi}</b></td></tr>
-    </table>
-    <p style="color:#888;font-size:12px">Pesan ini dikirim otomatis oleh Bot Nominasi.</p>
-  `;
+/** Jadikan nama attachment aman untuk filesystem/email client. */
+function sanitizeAttachmentFileName(filename) {
+  const safeFilename = String(filename || 'Lampiran Nominasi.xlsx')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim();
+  return safeFilename || 'Lampiran Nominasi.xlsx';
+}
 
-  return { subject, text, html };
+/**
+ * Nama attachment mengikuti format client:
+ * - Nominasi: Form Nominasi Harian IP PLTGU Cilegon (LNG)_12082026.xlsx
+ * - ReNominasi: Form Nominasi Harian IP PLTGU Cilegon (LNG)_11082026_R1.xlsx
+ */
+function buildAttachmentFileName(generatedFilename, revision) {
+  const safeFilename = sanitizeAttachmentFileName(generatedFilename);
+  if (!revision) return safeFilename;
+
+  const ext = path.extname(safeFilename) || '.xlsx';
+  const basename = safeFilename.slice(0, safeFilename.length - ext.length) || 'Lampiran Nominasi';
+  return `${basename}_R${revision}${ext}`;
+}
+
+/** Susun payload Nodemailer; file Excel wajib dilampirkan untuk semua jenis nominasi. */
+function buildSendMailOptions(emailConfig, mail, generated) {
+  return {
+    from: emailConfig.from,
+    to: emailConfig.to,
+    cc: emailConfig.cc.length ? emailConfig.cc : undefined,
+    subject: mail.subject,
+    text: mail.text,
+    html: mail.html,
+    attachments: [{
+      filename: buildAttachmentFileName(generated.filename, mail.revision),
+      content: generated.buffer,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }],
+  };
+}
+
+function normalizeAddress(address) {
+  const value = typeof address === 'object' && address ? address.address : address;
+  const text = String(value || '').trim().toLowerCase();
+  const angleMatch = text.match(/<([^<>]+)>/);
+  return (angleMatch ? angleMatch[1] : text).trim();
+}
+
+function buildRecipientResults(to, cc, accepted = [], rejected = []) {
+  const acceptedSet = new Set(accepted.map(normalizeAddress));
+  const rejectedSet = new Set(rejected.map(normalizeAddress));
+  const recipients = [
+    ...to.map((address) => ({ address, type: 'to' })),
+    ...cc.map((address) => ({ address, type: 'cc' })),
+  ];
+  return recipients.map((recipient) => {
+    const key = normalizeAddress(recipient.address);
+    return {
+      ...recipient,
+      status: acceptedSet.has(key) ? 'accepted' : rejectedSet.has(key) ? 'rejected' : 'unknown',
+    };
+  });
 }
 
 /**
  * Kirim email form nominasi.
  * @param {object} form  hasil buildForm()
  * @param {string} [kind] 'Nominasi' | 'Re-Nominasi'
- * @returns {Promise<{sent:boolean, skipped?:boolean, reason?:string, messageId?:string}>}
+ * @param {object} dateObj hasil parser tanggal
+ * @returns {Promise<object>}
  */
-async function sendNominationEmail(form, kind = 'Re-Nominasi') {
+async function sendNominationEmail(form, kind = 'Re-Nominasi', dateObj, hourly) {
+  const e = config.email;
+  const revision = /^re/i.test(kind) ? nextRevision(form.date) : null;
+  const { subject, text, html } = buildMail(form, kind, revision);
+  const baseResult = {
+    status: 'skipped',
+    sent: false,
+    skipped: true,
+    from: e.from || null,
+    to: e.to,
+    cc: e.cc,
+    subject,
+    revision,
+    attachment: null,
+    recipients: buildRecipientResults(e.to, e.cc),
+  };
+
   if (!isEmailEnabled()) {
     return {
-      sent: true,
-      skipped: false,
+      ...baseResult,
       reason:
         'Email dinonaktifkan / konfigurasi belum lengkap (EMAIL_ENABLED, SMTP_USER, SMTP_PASS, EMAIL_TO).',
     };
   }
 
-  const e = config.email;
-  const { subject, text, html } = buildMail(form, kind);
-
+  let storedFile = null;
   try {
-    const info = await getTransporter().sendMail({
-      from: e.from,
-      to: e.to,
-      cc: e.cc.length ? e.cc : undefined,
-      subject,
-      text,
-      html,
-    });
-    return { sent: true, messageId: info.messageId };
+    if (!dateObj) throw new Error('Tanggal nominasi tidak tersedia untuk membuat lampiran.');
+
+    const generated = await buildAttachment(form, dateObj, hourly ? { hourly } : {});
+    const attachmentId = randomUUID();
+    await fs.promises.mkdir(EMAIL_ATTACHMENT_DIR, { recursive: true });
+    storedFile = path.join(EMAIL_ATTACHMENT_DIR, `${attachmentId}.xlsx`);
+    await fs.promises.writeFile(storedFile, generated.buffer);
+
+    const attachment = {
+      id: attachmentId,
+      filename: buildAttachmentFileName(generated.filename, revision),
+      size: generated.buffer.length,
+      downloadUrl: `/api/email-attachments/${attachmentId}`,
+    };
+
+    const info = await getTransporter().sendMail(
+      buildSendMailOptions(e, { subject, text, html, revision }, generated)
+    );
+    const recipients = buildRecipientResults(e.to, e.cc, info.accepted || [], info.rejected || []);
+    const acceptedCount = recipients.filter((recipient) => recipient.status === 'accepted').length;
+    const rejectedCount = recipients.filter((recipient) => recipient.status === 'rejected').length;
+    const unknownCount = recipients.length - acceptedCount - rejectedCount;
+    const status = acceptedCount === 0 ? 'failed' : rejectedCount > 0 || unknownCount > 0 ? 'partial' : 'sent';
+    return {
+      ...baseResult,
+      status,
+      sent: acceptedCount > 0,
+      skipped: false,
+      messageId: info.messageId,
+      smtpResponse: info.response || null,
+      accepted: info.accepted || [],
+      rejected: info.rejected || [],
+      recipients,
+      attachment,
+    };
   } catch (err) {
-    return { sent: false, reason: err.message };
+    if (storedFile) {
+      await fs.promises.unlink(storedFile).catch(() => {});
+    }
+    return {
+      ...baseResult,
+      status: 'failed',
+      skipped: false,
+      recipients: buildRecipientResults(e.to, e.cc),
+      reason: err.message,
+    };
   }
 }
 
-module.exports = { sendNominationEmail, isEmailEnabled, verifyConnection, buildMail };
+module.exports = {
+  sendNominationEmail,
+  isEmailEnabled,
+  verifyConnection,
+  buildMail,
+  buildAttachmentFileName,
+  buildSendMailOptions,
+  buildRecipientResults,
+  EMAIL_ATTACHMENT_DIR,
+};

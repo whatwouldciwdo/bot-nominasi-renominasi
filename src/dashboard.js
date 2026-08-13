@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const readline = require('readline');
+const { createHash } = require('crypto');
 const { NOMINASI_LOG } = require('./logger');
 
 /**
@@ -43,6 +44,7 @@ function readEntries() {
  * Entri lama mungkin belum punya field `email`.
  */
 function emailStatusOf(entry) {
+  if (entry.emailDetails && entry.emailDetails.status) return entry.emailDetails.status;
   if (entry.email === 'sent') return 'sent';
   if (entry.email === 'skipped') return 'skipped';
   if (entry.email === 'failed') return 'failed';
@@ -60,7 +62,7 @@ function computeStats(entries) {
     error: 0,
     ignored: 0,
     duplicate: 0,
-    email: { sent: 0, skipped: 0, failed: 0, unknown: 0 },
+    email: { sent: 0, partial: 0, skipped: 0, failed: 0, unknown: 0 },
     emailFailedEvents: 0,
     sendFailed: 0,
     firstTimestamp: null,
@@ -88,6 +90,7 @@ function computeStats(entries) {
         stats.success += 1;
         stats.byChat[chat].success += 1;
         stats.email[emailStatusOf(e)] += 1;
+        if (e.reply && e.reply.status === 'failed') stats.sendFailed += 1;
         if (!stats.lastSuccessAt || e.timestamp > stats.lastSuccessAt) {
           stats.lastSuccessAt = e.timestamp;
         }
@@ -117,11 +120,11 @@ function computeStats(entries) {
   stats.successRate = processed > 0 ? Math.round((stats.success / processed) * 1000) / 10 : 0;
 
   // Percobaan email dihitung dari nominasi sukses yang statusnya sent/failed.
-  const emailAttempts = stats.email.sent + stats.email.failed;
+  const emailAttempts = stats.email.sent + stats.email.partial + stats.email.failed;
   stats.emailAttempts = emailAttempts;
   stats.emailDeliveryRate =
-    emailAttempts > 0 ? Math.round((stats.email.sent / emailAttempts) * 1000) / 10 : null;
-  stats.allEmailsSent = stats.email.failed === 0 && stats.emailFailedEvents === 0;
+    emailAttempts > 0 ? Math.round(((stats.email.sent + stats.email.partial) / emailAttempts) * 1000) / 10 : null;
+  stats.allEmailsSent = stats.email.partial === 0 && stats.email.failed === 0 && stats.emailFailedEvents === 0;
 
   return stats;
 }
@@ -156,6 +159,89 @@ function buildHistory(entries, opts = {}) {
     errors: e.errors || null,
     raw: e.raw ? String(e.raw).slice(0, 300) : null,
   }));
+}
+
+function normalizeLimit(value) {
+  return Math.max(1, Math.min(parseInt(value || 100, 10) || 100, 1000));
+}
+
+function newestFirst(entries) {
+  return [...entries].sort((a, b) =>
+    (b.timestamp || '').localeCompare(a.timestamp || '')
+  );
+}
+
+function emailEntryId(entry) {
+  return createHash('sha256')
+    .update(`${entry.timestamp || ''}|${entry.messageId || ''}|${entry.emailDetails?.messageId || ''}`)
+    .digest('hex')
+    .slice(0, 24);
+}
+
+function serializeEmailEntry(entry) {
+  const details = entry.emailDetails || {};
+  return {
+    id: emailEntryId(entry),
+    timestamp: entry.timestamp || null,
+    status: emailStatusOf(entry),
+    kind: entry.kind || null,
+    date: entry.form ? entry.form.date : null,
+    form: entry.form || null,
+    subject: details.subject || null,
+    from: details.from || null,
+    to: details.to || [],
+    cc: details.cc || [],
+    messageId: details.messageId || null,
+    smtpResponse: details.smtpResponse || null,
+    reason: details.reason || null,
+    recipients: details.recipients || [],
+    attachment: details.attachment || null,
+  };
+}
+
+/** Riwayat balasan WhatsApp, terpisah dari aktivitas pengiriman email. */
+function buildReplyHistory(entries, opts = {}) {
+  const limit = normalizeLimit(opts.limit);
+  let list = entries.filter((entry) => entry.reply);
+  if (opts.replyStatus) {
+    list = list.filter((entry) => entry.reply.status === opts.replyStatus);
+  }
+  return newestFirst(list).slice(0, limit).map((entry) => ({
+    timestamp: entry.reply.timestamp || entry.timestamp || null,
+    status: entry.reply.status || 'unknown',
+    chatId: entry.chatId || null,
+    kind: entry.kind || null,
+    date: entry.form ? entry.form.date : null,
+    text: entry.reply.text || null,
+    reason: entry.reply.reason || null,
+  }));
+}
+
+/** Riwayat email beserta metadata lampiran yang tersimpan. */
+function buildEmailHistory(entries, opts = {}) {
+  const limit = normalizeLimit(opts.limit);
+  let list = entries.filter((entry) => entry.status === 'success' && (entry.emailDetails || entry.email));
+  if (opts.emailStatus) {
+    list = list.filter((entry) => emailStatusOf(entry) === opts.emailStatus);
+  }
+  return newestFirst(list).slice(0, limit).map(serializeEmailEntry);
+}
+
+async function findEmailHistory(id) {
+  const entries = await readEntries();
+  const entry = entries.find((item) =>
+    item.status === 'success' && (item.emailDetails || item.email) && emailEntryId(item) === id
+  );
+  return entry ? serializeEmailEntry(entry) : null;
+}
+
+async function findEmailAttachment(id) {
+  const entries = await readEntries();
+  for (const entry of entries) {
+    const attachment = entry.emailDetails && entry.emailDetails.attachment;
+    if (attachment && attachment.id === id) return attachment;
+  }
+  return null;
 }
 
 /**
@@ -195,6 +281,7 @@ function buildTimeSeries(entries, days = 14) {
 function emailBreakdown(stats) {
   return [
     { label: 'Terkirim', key: 'sent', value: stats.email.sent },
+    { label: 'Sebagian', key: 'partial', value: stats.email.partial },
     { label: 'Dilewati', key: 'skipped', value: stats.email.skipped },
     { label: 'Gagal', key: 'failed', value: stats.email.failed + stats.emailFailedEvents },
   ];
@@ -207,6 +294,8 @@ async function getDashboardData(opts = {}) {
   return {
     stats,
     history: buildHistory(entries, opts),
+    replyHistory: buildReplyHistory(entries, opts),
+    emailHistory: buildEmailHistory(entries, opts),
     timeseries: buildTimeSeries(entries, opts.days ? parseInt(opts.days, 10) : 14),
     emailBreakdown: emailBreakdown(stats),
   };
@@ -219,5 +308,9 @@ module.exports = {
   buildTimeSeries,
   emailBreakdown,
   getDashboardData,
+  buildReplyHistory,
+  buildEmailHistory,
+  findEmailAttachment,
+  findEmailHistory,
   emailStatusOf,
 };

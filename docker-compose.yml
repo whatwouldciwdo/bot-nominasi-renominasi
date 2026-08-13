@@ -5,15 +5,15 @@ services:
     container_name: waha
     restart: unless-stopped
     ports:
-      - "8310:3000" # dashboard & API WAHA -> http://localhost:8310
+      - "3010:3000" # dashboard & API WAHA -> http://localhost:3010
     environment:
-      # Kirim event "message" ke backend bot
+      # Kirim pesan baru dan hasil edit pesan ke backend bot.
       WHATSAPP_HOOK_URL: "http://bot:3001/webhook"
-      WHATSAPP_HOOK_EVENTS: "message"
+      WHATSAPP_HOOK_EVENTS: "message,message.edited"
       # API key TETAP supaya WAHA tidak generate key acak tiap restart.
       # (kalau kosong, WAHA bikin key baru terus -> auth dashboard kacau)
       WAHA_API_KEY: "bot-cilegon-secret-2026"
-      # --- Login dashboard WAHA (http://localhost:8310) ---
+      # --- Login dashboard WAHA (http://localhost:3010) ---
       # WAHA 2026 menolak password lemah (mis. "admin") & generate acak tiap
       # restart. Maka password dipin ke string kuat di bawah ini supaya TETAP.
       WAHA_DASHBOARD_USERNAME: "admin"
@@ -35,6 +35,8 @@ services:
       PORT: "3001"
       WAHA_URL: "http://waha:3000"
       WAHA_API_KEY: "bot-cilegon-secret-2026"
+      # Gunakan sesi khusus bot nominasi agar terpisah dari bot CCTV.
+      WAHA_SESSION: "nominasi-cilegon"
     ports:
       - "8301:3001" # backend bot -> http://localhost:8301
     volumes:

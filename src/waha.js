@@ -14,6 +14,49 @@ const http = axios.create({
   headers: config.waha.apiKey ? { 'X-Api-Key': config.waha.apiKey } : {},
 });
 
+const LID_CACHE_TTL_MS = 5 * 60 * 1000;
+// WAHA membatasi endpoint /lids ke 100 entri secara default. Sesi aktif dapat
+// memiliki ratusan mapping, jadi ambil seluruh tabel agar anggota grup lama
+// tidak gagal dikenali hanya karena berada di luar halaman pertama.
+const LID_FETCH_LIMIT = 10000;
+const lidCache = new Map();
+
+function findPhoneNumberForLid(lid, entries) {
+  if (!String(lid || '').endsWith('@lid') || !Array.isArray(entries)) return '';
+  const match = entries.find((entry) => entry && entry.lid === lid);
+  return match && match.pn ? match.pn : '';
+}
+
+/**
+ * Engine WAHA terbaru dapat mengirim participant grup sebagai ...@lid.
+ * Endpoint /api/{session}/lids menyediakan pasangan LID -> nomor WhatsApp.
+ */
+async function resolveSenderId(senderId, session) {
+  if (!String(senderId || '').endsWith('@lid')) return senderId || '';
+
+  const sessionName = session || config.waha.session;
+  const cached = lidCache.get(sessionName);
+  let entries = cached && cached.expiresAt > Date.now() ? cached.entries : null;
+
+  if (!entries) {
+    try {
+      const res = await http.get(`/api/${encodeURIComponent(sessionName)}/lids`, {
+        params: { limit: LID_FETCH_LIMIT },
+      });
+      entries = Array.isArray(res.data) ? res.data : [];
+      lidCache.set(sessionName, {
+        entries,
+        expiresAt: Date.now() + LID_CACHE_TTL_MS,
+      });
+    } catch (err) {
+      console.error(`[WAHA] gagal memuat pemetaan LID: ${err.message}`);
+      return senderId;
+    }
+  }
+
+  return findPhoneNumberForLid(senderId, entries) || senderId;
+}
+
 /**
  * Kirim pesan teks ke sebuah chat.
  * @param {string} chatId  mis. "1203630xxxx@g.us" atau "628xxxx@c.us"
@@ -45,4 +88,4 @@ async function getSessionStatus() {
   }
 }
 
-module.exports = { sendText, getSessionStatus, http };
+module.exports = { sendText, getSessionStatus, resolveSenderId, findPhoneNumberForLid, http };

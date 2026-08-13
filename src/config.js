@@ -27,6 +27,10 @@ const config = {
   // ID grup target. Kosong = terima dari semua chat (mode uji).
   targetGroupId: process.env.TARGET_GROUP_ID || '',
 
+  // Nomor pengirim yang boleh memicu reply dan email (format bebas, dipisah koma).
+  // Kosong = semua pengirim di grup target diizinkan.
+  allowedSenderNumbers: parseList(process.env.ALLOWED_SENDER_NUMBERS),
+
   // Kata kunci pemicu (minimal satu harus ada di pesan).
   triggerKeywords: parseList(process.env.TRIGGER_KEYWORDS) || [],
 
