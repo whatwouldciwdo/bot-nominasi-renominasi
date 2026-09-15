@@ -21,7 +21,12 @@ const {
 } = require('./emailService');
 const { buildAttachment } = require('./xlsxService');
 
-const { getDashboardData, findEmailAttachment, findEmailHistory } = require('./dashboard');
+const {
+  getDashboardData,
+  findEmailAttachment,
+  findEmailAttachmentWithEntry,
+  findEmailHistory,
+} = require('./dashboard');
 const { normalizeSenderNumber, isAllowedSender } = require('./senderFilter');
 const { extractMessage, buildDedupeKey } = require('./webhookMessage');
 const { createCLChangeTracker } = require('./clChangeTracker');
@@ -111,10 +116,30 @@ app.get('/api/email-attachments/:id', async (req, res) => {
   if (!/^[a-f0-9-]{36}$/i.test(id)) {
     return res.status(400).json({ error: 'ID lampiran tidak valid.' });
   }
-  const attachment = await findEmailAttachment(id);
-  if (!attachment) return res.status(404).json({ error: 'Lampiran tidak ditemukan.' });
+  const found = await findEmailAttachmentWithEntry(id);
+  if (!found) return res.status(404).json({ error: 'Lampiran tidak ditemukan.' });
 
+  const { attachment, entry } = found;
   const storedFile = path.join(EMAIL_ATTACHMENT_DIR, `${id}.xlsx`);
+
+  if (fs.existsSync(storedFile)) {
+    return res.download(storedFile, attachment.filename);
+  }
+
+  // Jika file fisik belum tersimpan di disk, auto-generate dari form & template
+  try {
+    const { extractDate } = require('./parser/extractDate');
+    const dateObj = extractDate(entry.form?.date || '');
+    if (dateObj) {
+      const generated = await buildAttachment(entry.form, dateObj);
+      await fs.promises.mkdir(EMAIL_ATTACHMENT_DIR, { recursive: true });
+      await fs.promises.writeFile(storedFile, generated.buffer);
+      return res.download(storedFile, attachment.filename);
+    }
+  } catch (genErr) {
+    console.warn('[attachment] Gagal auto-generate lampiran:', genErr.message);
+  }
+
   return res.download(storedFile, attachment.filename, (err) => {
     if (err && !res.headersSent) res.status(404).json({ error: 'File lampiran tidak tersedia.' });
   });

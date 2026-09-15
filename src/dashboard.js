@@ -254,6 +254,15 @@ async function findEmailAttachment(id) {
   return null;
 }
 
+async function findEmailAttachmentWithEntry(id) {
+  const entries = await readEntries();
+  for (const entry of entries) {
+    const attachment = entry.emailDetails && entry.emailDetails.attachment;
+    if (attachment && attachment.id === id) return { attachment, entry };
+  }
+  return null;
+}
+
 /**
  * Bangun deret waktu harian (untuk grafik tren).
  * @param {object[]} entries
@@ -321,6 +330,7 @@ module.exports = {
   buildReplyHistory,
   buildEmailHistory,
   findEmailAttachment,
+  findEmailAttachmentWithEntry,
   findEmailHistory,
   emailStatusOf,
 };
