@@ -42,7 +42,7 @@ function extractDate(text) {
   const monthPattern = monthNames.join('|');
 
   const re = new RegExp(
-    `\\b(\\d{1,2})\\s+(${monthPattern})\\s+(\\d{2,4})\\b`,
+    `\\b(\\d{1,2})(?:\\s*[-/]?\\s*|\\s+)(${monthPattern})(?:\\s*[-/]?\\s*|\\s+)(\\d{2,4})\\b`,
     'i'
   );
 
