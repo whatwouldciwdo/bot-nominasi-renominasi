@@ -20,17 +20,24 @@ const {
   EMAIL_ATTACHMENT_DIR,
 } = require('./emailService');
 const { buildAttachment } = require('./xlsxService');
-const { buildHourlyProfile } = require('./hourlyProfile');
+
 const { getDashboardData, findEmailAttachment, findEmailHistory } = require('./dashboard');
 const { normalizeSenderNumber, isAllowedSender } = require('./senderFilter');
 const { extractMessage, buildDedupeKey } = require('./webhookMessage');
 const { createCLChangeTracker } = require('./clChangeTracker');
 const settingsService = require('./settingsService');
+const { initDb, pingDb, getPreviousEntries } = require('./db');
 const path = require('path');
 
 const app = express();
 const clChangeTracker = createCLChangeTracker();
+
+// Inisialisasi pengaturan & PostgreSQL
 settingsService.loadSettings();
+initDb().then(() => {
+  settingsService.loadSettingsFromDb().catch(() => {});
+});
+
 app.use(express.json({ limit: '1mb' }));
 app.use(
   '/dashboard/assets',
@@ -38,8 +45,14 @@ app.use(
 );
 
 // Healthcheck
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime() });
+app.get('/health', async (req, res) => {
+  const dbHealth = await pingDb();
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    db: dbHealth.ok ? 'connected' : 'disconnected',
+    dbDetails: dbHealth,
+  });
 });
 
 app.get('/', (req, res) => {
@@ -269,9 +282,12 @@ app.post('/webhook', async (req, res) => {
     const form = buildForm(parsed.date, parsed.cl);
     let previousEntries = [];
     try {
-      if (fs.existsSync(NOMINASI_LOG)) {
-        previousEntries = fs.readFileSync(NOMINASI_LOG, 'utf8').split('\n')
-          .filter(Boolean).map((line) => JSON.parse(line));
+      previousEntries = await getPreviousEntries(200);
+      if (!previousEntries || previousEntries.length === 0) {
+        if (fs.existsSync(NOMINASI_LOG)) {
+          previousEntries = fs.readFileSync(NOMINASI_LOG, 'utf8').split('\n')
+            .filter(Boolean).map((line) => JSON.parse(line));
+        }
       }
     } catch (_) { /* histori rusak/tidak ada: mulai dari baseline baru */ }
 
@@ -301,10 +317,10 @@ app.post('/webhook', async (req, res) => {
       return;
     }
 
-    const hourly = buildHourlyProfile(form, msg.messageTimestamp, previousEntries);
-
     // Kirim email jika diaktifkan di .env.
-    const emailResult = await sendNominationEmail(form, parsed.kind, parsed.date, hourly);
+    // Sheet diisi flat (nilai konstan per jam) sesuai swap & stok dari form,
+    // berlaku sama untuk Nominasi, Revisi Nominasi, maupun Re-Nominasi.
+    const emailResult = await sendNominationEmail(form, parsed.kind, parsed.date);
     if (emailResult.status === 'sent') {
       console.log(`[EMAIL] terkirim ke semua penerima: ${emailResult.messageId}`);
     } else if (emailResult.status === 'partial') {

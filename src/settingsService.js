@@ -70,6 +70,8 @@ function applySettings(settings) {
   return getSettings();
 }
 
+const { getSettingsFromDb, saveSettingsToDb } = require('./db');
+
 function loadSettings() {
   try {
     if (!fs.existsSync(SETTINGS_FILE)) return getSettings();
@@ -81,12 +83,29 @@ function loadSettings() {
   }
 }
 
+async function loadSettingsFromDb() {
+  try {
+    const stored = await getSettingsFromDb('operational_settings');
+    if (stored) {
+      return applySettings(normalizeSettingsPayload(stored));
+    }
+  } catch (err) {
+    console.warn('[settings] gagal memuat dari PostgreSQL:', err.message);
+  }
+  return loadSettings();
+}
+
 function saveSettings(payload) {
   const settings = normalizeSettingsPayload(payload);
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   const temporaryFile = `${SETTINGS_FILE}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryFile, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
   fs.renameSync(temporaryFile, SETTINGS_FILE);
+
+  saveSettingsToDb('operational_settings', settings).catch((err) => {
+    console.error('[settings] gagal simpan ke PostgreSQL:', err.message);
+  });
+
   return applySettings(settings);
 }
 
@@ -94,6 +113,7 @@ module.exports = {
   SETTINGS_FILE,
   getSettings,
   loadSettings,
+  loadSettingsFromDb,
   saveSettings,
   normalizeSettingsPayload,
 };

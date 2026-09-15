@@ -8,13 +8,23 @@ const fs = require('fs');
 const readline = require('readline');
 const { createHash } = require('crypto');
 const { NOMINASI_LOG } = require('./logger');
+const { getEntriesFromDb } = require('./db');
 
 /**
- * Baca seluruh entri log secara streaming (aman untuk file besar).
- * Baris yang korup/tidak valid JSON akan dilewati.
+ * Baca seluruh entri log dari PostgreSQL (primary) atau file JSONL (fallback).
+ * @param {object} [opts]
  * @returns {Promise<object[]>}
  */
-function readEntries() {
+async function readEntries(opts = {}) {
+  try {
+    const dbEntries = await getEntriesFromDb(opts);
+    if (Array.isArray(dbEntries) && dbEntries.length > 0) {
+      return dbEntries;
+    }
+  } catch (err) {
+    console.warn('[dashboard] Gagal membaca dari PostgreSQL, fallback ke file lokal:', err.message);
+  }
+
   return new Promise((resolve) => {
     const entries = [];
     if (!fs.existsSync(NOMINASI_LOG)) {

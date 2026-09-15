@@ -18,10 +18,25 @@ function parseBool(value, fallback = false) {
 const config = {
   port: parseInt(process.env.PORT || '3000', 10),
 
+  databaseUrl:
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    'postgresql://postgres:Cilego2026.@10.8.140.69:5432/nomrenom_db',
+
   waha: {
-    url: (process.env.WAHA_URL || 'http://localhost:3000').replace(/\/+$/, ''),
-    session: process.env.WAHA_SESSION || 'default',
-    apiKey: process.env.WAHA_API_KEY || '',
+    url: (
+      process.env.WHATSAPP_API_URL ||
+      process.env.WAHA_URL ||
+      'http://localhost:3000'
+    ).replace(/\/+$/, ''),
+    session:
+      process.env.WHATSAPP_SESSION ||
+      process.env.WAHA_SESSION ||
+      'nominasi-renominasi',
+    apiKey:
+      process.env.WHATSAPP_API_KEY ||
+      process.env.WAHA_API_KEY ||
+      '',
   },
 
   // ID grup target. Kosong = terima dari semua chat (mode uji).

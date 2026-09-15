@@ -1,9 +1,13 @@
 node_modules/
 logs/
 .env
+.env.*
 *.log
 .DS_Store
 public/dashboard/
+
+# Preview files
+preview*.xlsx
 
 # File lock/temporary Office (Excel/Word)
 ~$*
