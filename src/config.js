@@ -16,7 +16,7 @@ function parseBool(value, fallback = false) {
 }
 
 const config = {
-  port: parseInt(process.env.PORT || '3000', 10),
+  port: parseInt(process.env.PORT || '3118', 10),
 
   databaseUrl:
     process.env.DATABASE_URL ||

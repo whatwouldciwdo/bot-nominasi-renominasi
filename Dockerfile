@@ -19,6 +19,6 @@ COPY templates ./templates
 RUN npm run build:dashboard && npm prune --omit=dev
 
 ENV NODE_ENV=production
-EXPOSE 3001
+EXPOSE 3118
 
 CMD ["node", "src/server.js"]

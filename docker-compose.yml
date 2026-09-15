@@ -8,8 +8,8 @@ services:
       - .env
     environment:
       NODE_ENV: production
-      PORT: ${PORT:-3001}
+      PORT: ${PORT:-3118}
     ports:
-      - "${PORT:-3001}:${PORT:-3001}"
+      - "${PORT:-3118}:${PORT:-3118}"
     volumes:
       - ./logs:/app/logs

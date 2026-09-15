@@ -41,7 +41,7 @@ nano .env
 
 Pastikan variabel berikut terisi:
 ```env
-PORT=3001
+PORT=3118
 
 # PostgreSQL Database
 DATABASE_URL=postgresql://postgres:Cilego2026.@10.8.140.69:5432/nomrenom_db
@@ -86,7 +86,7 @@ docker compose logs -f bot
 
 ## 5. Hubungkan Webhook WAHA ke Server Ubuntu
 
-Agar bot menerima pesan dari WhatsApp grup, webhook pada sesi `nominasi-renominasi` di server WAHA (`10.8.140.67:3010`) harus mengarah ke IP Ubuntu Anda pada port `3001`.
+Agar bot menerima pesan dari WhatsApp grup, webhook pada sesi `nominasi-renominasi` di server WAHA (`10.8.140.67:3010`) harus mengarah ke IP Ubuntu Anda pada port `3118`.
 
 Misalkan IP server Ubuntu Anda adalah `10.8.140.70`, jalankan perintah ini di Ubuntu (atau via curl/Postman):
 
@@ -98,7 +98,7 @@ curl -X PUT "http://10.8.140.67:3010/api/sessions/nominasi-renominasi" \
     "config": {
       "webhooks": [
         {
-          "url": "http://<IP_UBUNTU>:3001/webhook",
+          "url": "http://<IP_UBUNTU>:3118/webhook",
           "events": ["message", "message.edited"]
         }
       ]
@@ -114,7 +114,7 @@ curl -X PUT "http://10.8.140.67:3010/api/sessions/nominasi-renominasi" \
 
 1. **Cek Healthcheck:**
    ```bash
-   curl http://localhost:3001/health
+   curl http://localhost:3118/health
    ```
    Output yang diharapkan:
    ```json
@@ -123,12 +123,12 @@ curl -X PUT "http://10.8.140.67:3010/api/sessions/nominasi-renominasi" \
 
 2. **Cek Status WAHA:**
    ```bash
-   curl http://localhost:3001/api/waha-status
+   curl http://localhost:3118/api/waha-status
    ```
 
 3. **Buka Dashboard Web:**
    Buka browser ke:
-   `http://<IP_UBUNTU>:3001/dashboard`
+   `http://<IP_UBUNTU>:3118/dashboard`
 
 4. **Kirim Pesan Uji:**
    Kirim pesan nominasi di grup WhatsApp target dan periksa log bot:
